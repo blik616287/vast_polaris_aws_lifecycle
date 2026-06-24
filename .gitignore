@@ -1,0 +1,18 @@
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+voc.plan
+crash.log
+.terraform.lock.hcl
+
+# Build artifacts
+terraform/.build/
+scripts/bin/
+
+# Secrets / keys (never commit)
+*.pem
+*.tfvars.local
+*.auto.tfvars
+secrets.auto.tfvars
