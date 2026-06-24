@@ -1,0 +1,76 @@
+version: 0.2
+# Run by the CodeBuild project (provisioned in terraform/codebuild.tf) as the
+# Build stage of the CodePipeline. The pipeline's S3 source artifact contains
+# this file, scripts/, and a generated deploy.env (CLUSTER_NAME/ACTION/SUBNET/SG/...).
+# Polaris creds arrive as SECRETS_MANAGER env vars on the CodeBuild project.
+#
+# ACTION (in deploy.env, rendered from var.cluster_action):
+#   deploy  -> scripts/deploy-voc.sh   (runs `vastcloud cluster create`)
+#   destroy -> scripts/destroy-voc.sh  (runs `vastcloud cluster delete`)
+#   none    -> no-op
+
+env:
+  variables:
+    TF_VERSION: "1.9.8"
+
+phases:
+  install:
+    commands:
+      - set -eu
+      - . ./deploy.env   # CLUSTER_NAME ACTION REGION ZONE SUBNET_ID SG_ID NODES INSTANCE_TYPE PROFILE
+      - echo "ACTION=$ACTION CLUSTER=$CLUSTER_NAME REGION=$REGION SUBNET=$SUBNET_ID SG=$SG_ID"
+      # vastcloud's pre-checker/create need terraform + aws cli on PATH.
+      - |
+        if ! command -v terraform >/dev/null 2>&1; then
+          curl -fsSL -o /tmp/tf.zip "https://releases.hashicorp.com/terraform/${TF_VERSION}/terraform_${TF_VERSION}_linux_amd64.zip"
+          unzip -o /tmp/tf.zip -d /usr/local/bin >/dev/null
+        fi
+      - terraform version | head -1
+      - aws --version
+      # vastcloud shells out to its own bundled terraform with a sanitized env (no
+      # IMDS, no container endpoint), so those subprocesses can't see the role.
+      # Materialize the CodeBuild role's OWN short-lived session creds into the
+      # shared credentials file (default + the profile) so every process reads
+      # them from disk. Temporary (expire in hours), fetched at runtime, never committed.
+      - |
+        URL="${AWS_CONTAINER_CREDENTIALS_FULL_URI:-http://169.254.170.2${AWS_CONTAINER_CREDENTIALS_RELATIVE_URI}}"
+        CREDS=$(curl -sf "$URL")
+        for P in default "$PROFILE"; do
+          aws configure set aws_access_key_id     "$(echo "$CREDS" | jq -r .AccessKeyId)"     --profile "$P"
+          aws configure set aws_secret_access_key "$(echo "$CREDS" | jq -r .SecretAccessKey)" --profile "$P"
+          aws configure set aws_session_token     "$(echo "$CREDS" | jq -r .Token)"           --profile "$P"
+          aws configure set region "$REGION" --profile "$P"
+        done
+        aws sts get-caller-identity --profile "$PROFILE"
+      # Install + configure + login vastcloud here so BOTH deploy and destroy paths
+      # have a ready CLI (destroy previously failed: vastcloud not installed -> exit 127).
+      - |
+        if ! command -v vastcloud >/dev/null 2>&1; then
+          curl -fL -o /usr/local/bin/vastcloud "https://storage.googleapis.com/polaris-vastcloud/linux-amd64/vastcloud"
+          chmod +x /usr/local/bin/vastcloud
+        fi
+        vastcloud config init --non-interactive --provider aws --aws-region "$REGION" \
+          --aws-profile "$PROFILE" --endpoint "https://api.aws.polaris.vastdata.com" \
+          --account-name "$PROFILE" --force
+        printf '%s' "$POLARIS_PASSWORD" | vastcloud login --username "$POLARIS_USERNAME" --password-stdin
+      - chmod +x scripts/*.sh
+  build:
+    commands:
+      - set -eu
+      - . ./deploy.env
+      - |
+        case "$ACTION" in
+          deploy)
+            scripts/deploy-voc.sh "$CLUSTER_NAME" \
+              --profile "$PROFILE" --region "$REGION" --zone "$ZONE" \
+              --subnet "$SUBNET_ID" --sg "$SG_ID" --nodes "$NODES" \
+              ${INSTANCE_TYPE:+--instance-type "$INSTANCE_TYPE"}
+            ;;
+          destroy)
+            scripts/destroy-voc.sh "$CLUSTER_NAME" --profile "$PROFILE"
+            ;;
+          none|"")
+            echo "ACTION=none — nothing to do." ;;
+          *)
+            echo "Unknown ACTION=$ACTION"; exit 1 ;;
+        esac
