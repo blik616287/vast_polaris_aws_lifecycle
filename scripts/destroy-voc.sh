@@ -20,27 +20,30 @@ while [[ $# -gt 0 ]]; do case "$1" in
   --network) ALSO_NETWORK="1"; shift;;
   *) echo "unknown arg: $1"; exit 1;; esac; done
 export AWS_PROFILE="$PROFILE"
+REGION="${REGION:-us-east-2}"
+CLUSTER_DIR="$HOME/.vast/clusters/$CLUSTER"
 
-# Discover the cluster from its vast-cluster-* S3 bucket — a fresh CodeBuild
-# container has no local ~/.vast state, so without this `cluster delete` reports
-# "not found" and the node orphans. This populates vastcloud so delete can run.
-echo "==> Discovering cluster '$CLUSTER' from S3 (orphaned/not-locally-tracked)"
-"$VASTCLOUD" cluster list --include-bucket-discovery --non-interactive >/dev/null 2>&1 || true
-
-# Idempotent: if the cluster isn't discoverable, it's already gone -> success.
-if ! "$VASTCLOUD" cluster list --include-bucket-discovery --non-interactive --output json 2>/dev/null \
-     | python3 -c "import sys,json
-d=json.load(sys.stdin) or []
-sys.exit(0 if ('$CLUSTER' in json.dumps(d)) else 1)"; then
-  echo "==> Cluster '$CLUSTER' not found — already destroyed. Nothing to do."
+# Restore the cluster's local state from the persist bucket. vastcloud's
+# `cluster delete` needs ~/.vast/clusters/<name>/ (cluster.json + terraform dir)
+# to recognize the cluster; a fresh CodeBuild container has none. Without this it
+# reports "not found" and orphans the node. (deploy-voc.sh step 7 saved it here.)
+if [[ -n "${STATE_BUCKET:-}" ]] && aws s3 ls "s3://$STATE_BUCKET/$CLUSTER/cluster.json" --region "$REGION" >/dev/null 2>&1; then
+  echo "==> Restoring cluster state from s3://$STATE_BUCKET/$CLUSTER/ -> $CLUSTER_DIR"
+  mkdir -p "$CLUSTER_DIR"
+  aws s3 sync "s3://$STATE_BUCKET/$CLUSTER/" "$CLUSTER_DIR/" --region "$REGION"
+elif [[ ! -f "$CLUSTER_DIR/cluster.json" ]]; then
+  echo "==> No persisted state for '$CLUSTER' and none local — assuming already destroyed. Nothing to do."
   exit 0
 fi
 
-echo "==> Deleting cluster '$CLUSTER' via vast CLI (terminates the node, removes state bucket)"
+echo "==> Deleting cluster '$CLUSTER' via vast CLI (terminates the node, then removes its state bucket)"
 "$VASTCLOUD" cluster delete "$CLUSTER" --non-interactive --force --delete-state-bucket
 
-echo "==> Post-delete cluster list"
-"$VASTCLOUD" cluster list --include-bucket-discovery || true
+# Clean up the persisted copy now that the cluster is gone.
+if [[ -n "${STATE_BUCKET:-}" ]]; then
+  aws s3 rm "s3://$STATE_BUCKET/$CLUSTER/" --recursive --region "$REGION" >/dev/null 2>&1 || true
+fi
+echo "==> Cluster '$CLUSTER' deleted."
 
 if [[ "$ALSO_NETWORK" == "1" ]]; then
   cat <<EOF
