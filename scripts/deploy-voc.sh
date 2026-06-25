@@ -111,16 +111,19 @@ else
   log "Key pair $KN already exists"
 fi
 
-# ---- 5. idempotency: cross-reference vastcloud's cluster list, incl. S3 discovery ----
-# A fresh CodeBuild container has no local ~/.vast state, so plain `cluster list` is
-# empty. `--include-bucket-discovery` scans the vast-cluster-* S3 buckets to find
-# clusters created by a previous build. A deploy must never rebuild an existing one.
-if "$VASTCLOUD" cluster list --include-bucket-discovery --non-interactive --output json 2>/dev/null \
-     | python3 -c "import sys,json
-d=json.load(sys.stdin) or []
-sys.exit(0 if ('$CLUSTER' in json.dumps(d)) else 1)"; then
-  log "Cluster '$CLUSTER' already exists (vastcloud discovery) — deploy is a no-op."
-  log "To recreate, run cluster_action=destroy first."
+# ---- 5. idempotency: a deploy must never rebuild an existing cluster ----
+# vastcloud's local ~/.vast state is empty in a fresh container, so we use the
+# persisted cluster state in STATE_BUCKET (saved by a previous deploy, step 7)
+# as the source of truth, plus a running-instance tag check as a backstop.
+CLUSTER_DIR="$HOME/.vast/clusters/$CLUSTER"
+if [[ -n "${STATE_BUCKET:-}" ]] && aws s3 ls "s3://$STATE_BUCKET/$CLUSTER/cluster.json" --region "$REGION" >/dev/null 2>&1; then
+  log "Cluster '$CLUSTER' already deployed (state in s3://$STATE_BUCKET/$CLUSTER/) — deploy is a no-op."
+  exit 0
+fi
+if aws ec2 describe-instances --region "$REGION" \
+     --filters "Name=tag:cluster_name,Values=${CLUSTER}" "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+     --query 'Reservations[].Instances[].InstanceId' --output text 2>/dev/null | grep -q .; then
+  log "Cluster '$CLUSTER' already has running instances — deploy is a no-op."
   exit 0
 fi
 
@@ -134,6 +137,15 @@ ARGS=(cluster create "$CLUSTER" --provider aws --region "$REGION" --zone "$ZONE"
 log "Creating cluster (this provisions a real i3en.24xlarge node — ~\$10.85/hr until deleted)"
 echo "    $VASTCLOUD ${ARGS[*]}"
 "$VASTCLOUD" "${ARGS[@]}"
+
+# ---- 7. persist the cluster's local state so a future (ephemeral) destroy build
+# can restore it and run `vastcloud cluster delete`. This is the key to making the
+# vast-CLI delete work across containers: vastcloud needs ~/.vast/clusters/<name>/
+# (cluster.json + terraform dir) to recognize the cluster. ----
+if [[ -n "${STATE_BUCKET:-}" && -d "$CLUSTER_DIR" ]]; then
+  log "Persisting cluster state -> s3://$STATE_BUCKET/$CLUSTER/"
+  aws s3 sync "$CLUSTER_DIR/" "s3://$STATE_BUCKET/$CLUSTER/" --region "$REGION" --delete
+fi
 
 log "Done. Cluster info:"
 # Informational only — the cluster is already created/ready above. Don't fail the

@@ -56,9 +56,29 @@ locals {
     "NODES=${var.cluster_nodes}",
     "INSTANCE_TYPE=${var.cluster_instance_type}",
     "PROFILE=${var.aws_profile}",
+    "STATE_BUCKET=${aws_s3_bucket.cluster_state.id}",
     "",
   ])
   name_prefix = "vast-voc-${var.environment}"
+}
+
+# ---------------------------------------------------------------------------
+# Durable bucket that persists each cluster's local ~/.vast/clusters/<name>/
+# state (cluster.json + terraform dir). vastcloud needs that local state to
+# recognize+delete a cluster; CodeBuild containers are ephemeral, so the deploy
+# saves it here and the destroy restores it before `vastcloud cluster delete`.
+# ---------------------------------------------------------------------------
+resource "aws_s3_bucket" "cluster_state" {
+  bucket_prefix = "${local.name_prefix}-clusterstate-"
+  force_destroy = true
+}
+
+resource "aws_s3_bucket_public_access_block" "cluster_state" {
+  bucket                  = aws_s3_bucket.cluster_state.id
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
 }
 
 # ---------------------------------------------------------------------------
@@ -151,6 +171,10 @@ resource "aws_codebuild_project" "voc" {
 
   artifacts { type = "CODEPIPELINE" }
 
+  # Never let two lifecycle builds run at once (a second build racing a deploy
+  # is what orphaned a cluster). Extra invocations fail fast instead of racing.
+  concurrent_build_limit = 1
+
   environment {
     compute_type    = "BUILD_GENERAL1_SMALL"
     image           = "aws/codebuild/standard:7.0"
@@ -235,6 +259,12 @@ resource "aws_codepipeline" "voc" {
   name     = "${local.name_prefix}-lifecycle"
   role_arn = aws_iam_role.pipeline.arn
 
+  # V2 + QUEUED: a new trigger does NOT supersede/cancel a running execution
+  # (that mid-create cancellation is what orphaned a cluster). New triggers queue
+  # behind the running one; with the deploy's idempotency guard they no-op.
+  pipeline_type  = "V2"
+  execution_mode = "QUEUED"
+
   artifact_store {
     type     = "S3"
     location = aws_s3_bucket.pipeline.bucket
@@ -304,6 +334,10 @@ resource "aws_codebuild_project" "teardown" {
       name  = "PROFILE"
       value = var.aws_profile
     }
+    environment_variable {
+      name  = "STATE_BUCKET"
+      value = aws_s3_bucket.cluster_state.id
+    }
     dynamic "environment_variable" {
       for_each = var.polaris_secret_id != "" ? [1] : []
       content {
@@ -346,13 +380,21 @@ resource "aws_codebuild_project" "teardown" {
             - printf '%s' "$POLARIS_PASSWORD" | vastcloud login --username "$POLARIS_USERNAME" --password-stdin
         build:
           commands:
-            # Discover the cluster from its S3 state bucket (fresh container has no
-            # local ~/.vast state), then delete via vast CLI. No-op if already gone.
-            - echo "Discovering VoC cluster $CLUSTER_NAME from S3..."
-            - vastcloud cluster list --include-bucket-discovery --non-interactive >/dev/null 2>&1 || true
-            - echo "Deleting VoC cluster $CLUSTER_NAME (no-op if it does not exist)..."
-            - vastcloud cluster delete "$CLUSTER_NAME" --non-interactive --force --delete-state-bucket || true
-            - vastcloud cluster list --include-bucket-discovery || true
+            # Restore the cluster's local state (cluster.json + terraform dir) from the
+            # persist bucket so vastcloud recognizes it, then delete via the vast CLI.
+            # No-op if there's no persisted state (already destroyed / never deployed).
+            - |
+              CDIR="$HOME/.vast/clusters/$CLUSTER_NAME"
+              if aws s3 ls "s3://$STATE_BUCKET/$CLUSTER_NAME/cluster.json" --region "$REGION" >/dev/null 2>&1; then
+                echo "Restoring state for $CLUSTER_NAME from s3://$STATE_BUCKET/$CLUSTER_NAME/"
+                mkdir -p "$CDIR"
+                aws s3 sync "s3://$STATE_BUCKET/$CLUSTER_NAME/" "$CDIR/" --region "$REGION"
+                echo "Deleting VoC cluster $CLUSTER_NAME via vast CLI..."
+                vastcloud cluster delete "$CLUSTER_NAME" --non-interactive --force --delete-state-bucket || true
+                aws s3 rm "s3://$STATE_BUCKET/$CLUSTER_NAME/" --recursive --region "$REGION" >/dev/null 2>&1 || true
+              else
+                echo "No persisted state for $CLUSTER_NAME — nothing to delete."
+              fi
     YAML
   }
 
