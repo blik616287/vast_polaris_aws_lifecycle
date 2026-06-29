@@ -88,6 +88,11 @@ resource "aws_route_table" "public" {
     gateway_id = aws_internet_gateway.vast.id
   }
   tags = { Name = "vast-public-rt-${var.environment}" }
+  # Peer return routes (e.g. spectro-peering/ adds 10.30/16 -> pcx) are managed by
+  # other states; don't let this inline-route table reconcile them away.
+  lifecycle {
+    ignore_changes = [route]
+  }
 }
 
 resource "aws_route_table_association" "public" {
@@ -104,6 +109,10 @@ resource "aws_route_table" "private" {
     nat_gateway_id = aws_nat_gateway.vast[var.single_nat ? var.azs[0] : each.key].id
   }
   tags = { Name = "vast-private-rt-${each.key}" }
+  # See aws_route_table.public — peer return routes are managed elsewhere.
+  lifecycle {
+    ignore_changes = [route]
+  }
 }
 
 resource "aws_route_table_association" "private" {

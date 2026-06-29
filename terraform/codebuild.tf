@@ -101,6 +101,14 @@ data "archive_file" "source" {
     filename = "scripts/destroy-voc.sh"
   }
   source {
+    content  = file("${path.module}/../scripts/validate-voc.sh")
+    filename = "scripts/validate-voc.sh"
+  }
+  source {
+    content  = file("${path.module}/../scripts/polaris-register.sh")
+    filename = "scripts/polaris-register.sh"
+  }
+  source {
     content  = local.deploy_env
     filename = "deploy.env"
   }

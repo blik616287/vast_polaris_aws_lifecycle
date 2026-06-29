@@ -1,0 +1,73 @@
+pack:
+  content:
+    # BUILD-ON-DEPLOY (0/0 scan surface): the only image pulled as pack content is
+    # the 0-CVE Chainguard wolfi-base. The VAST driver + the 5 CSI sidecars are NOT
+    # listed here — the chart's fetch-runtime init container crane-exports each at
+    # deploy and runs it on wolfi-base (see the chart's templates/shared/_buildondeploy.tpl
+    # and .Values.image.* for the upstream crane sources). Mirrors the NVIDIA VSS 3.x
+    # mitigation. To pin/repoint the upstream sources, set charts.vastcsi.image.<role>.
+    images:
+      - image: cgr.dev/chainguard/wolfi-base:latest
+      - image: vastdataorg/csi:v2.6.5
+  namespace: vast-csi
+  # The CSI node plugin requires privileged pods to perform mounts.
+  # If a Pod Security Admission / Kyverno / OPA policy is enforced, the
+  # 'vast-csi' namespace must be whitelisted (privileged PSA level).
+  namespaceLabels:
+    "vast-csi": "pod-security.kubernetes.io/enforce=privileged"
+
+charts:
+  vastcsi:
+    ####################
+    # VAST REST SESSION (controller -> VMS)
+    ####################
+    # VMS REST API endpoint, e.g. https://<VMS-VIP>
+    # (May instead be supplied via the credentials secret's `endpoint` field.)
+    endpoint: ""
+    # Set true to validate the VMS TLS certificate (recommended in production;
+    # supply the CA via sslCertsSecretName).
+    verifySsl: false
+    # Name of a pre-created secret holding VAST credentials. Create with:
+    #   kubectl -n vast-csi create secret generic vast-mgmt \
+    #     --from-literal=username='<VAST user>' \
+    #     --from-literal=password='<VAST password>' \
+    #     --from-literal=endpoint='https://<VMS-VIP>'
+    # (or use --from-literal=token='<API token>' for VAST 5.3+ token auth)
+    secretName: "vast-mgmt"
+
+    ####################
+    # STORAGE CLASS DEFAULTS
+    # Cloud (AWS/VoC) tuning: the data path is TCP-only (no NFSoRDMA on AWS),
+    # so we load-balance across CNodes (vipPoolFQDNRandomPrefix) and open
+    # multiple TCP streams per mount (nconnect). Place worker nodes in the
+    # same AZ as the VIP pool for lowest latency / no cross-AZ charges.
+    ####################
+    storageClassDefaults:
+      secretName: "vast-mgmt"
+      # Where CSI volumes (views) are created on VAST -- MUST be set per env.
+      storagePath: ""
+      # Either vipPool (name) or vipPoolFQDN (DNS) -- MUST set one.
+      vipPool: ""
+      vipPoolFQDN: ""
+      vipPoolFQDNRandomPrefix: true
+      # VAST view policy controlling client access -- MUST be set per env.
+      viewPolicy: "default"
+      allowVolumeExpansion: true
+      reclaimPolicy: "Delete"
+      qosPolicy: ""
+      mountOptions:
+        - vers=3
+        - proto=tcp
+        - nolock
+        - nconnect=16
+
+    # Declare one or more StorageClasses. Left empty by default so the pack
+    # installs cleanly; uncomment and fill vipPool/storagePath/viewPolicy
+    # (or override per Palette cluster profile / per tenant -- see README).
+    storageClasses: {}
+    #   vastdata-filesystem:
+    #     storagePath: /k8s/<tenant>
+    #     vipPool: <tenant-vip-pool>
+    #     viewPolicy: <tenant-view-policy>
+    #     qosPolicy: <tenant-qos-policy>
+    #     setDefaultStorageClass: true

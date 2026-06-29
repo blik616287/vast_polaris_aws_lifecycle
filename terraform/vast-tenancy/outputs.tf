@@ -8,6 +8,8 @@ output "tenant_storageclass_inputs" {
       qos_policy   = vastdata_qos_policy.this[k].name
       storage_path = v.storage_path
       tenant_id    = vastdata_tenant.this[k].id
+      # vast-block StorageClass `subsystem` (profile var vastBlockSubsystem); "" if no block view.
+      block_subsystem = try(vastdata_view.block[k].name, "")
     }
   }
 }

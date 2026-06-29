@@ -111,15 +111,12 @@ else
   log "Key pair $KN already exists"
 fi
 
-# ---- 5. idempotency: a deploy must never rebuild an existing cluster ----
-# vastcloud's local ~/.vast state is empty in a fresh container, so we use the
-# persisted cluster state in STATE_BUCKET (saved by a previous deploy, step 7)
-# as the source of truth, plus a running-instance tag check as a backstop.
+# ---- 5. idempotency: a deploy must never rebuild a DEPLOYED cluster ----
+# The signal is RUNNING INSTANCES, not the Polaris listing: we deliberately
+# register a PENDING cluster in Polaris (step 6a) before deploying, and retained
+# config/state from a prior destroy also lingers — none of which means "deployed".
+# A deployed cluster has tagged EC2 instances; a pending registration does not.
 CLUSTER_DIR="$HOME/.vast/clusters/$CLUSTER"
-if [[ -n "${STATE_BUCKET:-}" ]] && aws s3 ls "s3://$STATE_BUCKET/$CLUSTER/cluster.json" --region "$REGION" >/dev/null 2>&1; then
-  log "Cluster '$CLUSTER' already deployed (state in s3://$STATE_BUCKET/$CLUSTER/) — deploy is a no-op."
-  exit 0
-fi
 if aws ec2 describe-instances --region "$REGION" \
      --filters "Name=tag:cluster_name,Values=${CLUSTER}" "Name=instance-state-name,Values=pending,running,stopping,stopped" \
      --query 'Reservations[].Instances[].InstanceId' --output text 2>/dev/null | grep -q .; then
@@ -127,10 +124,26 @@ if aws ec2 describe-instances --region "$REGION" \
   exit 0
 fi
 
-# ---- 6. create ----
+# ---- 6a. register a PENDING cluster in Polaris (so the deploy gets a PIN) ----
+# Bare `cluster create` runs the node --skip-polaris and its bootstrap dies at
+# `configure_cloud_resources` -> the VMS never installs (nothing on 443/5551).
+# Registering a pending cluster via the Polaris API lets `create --select` deploy
+# WITH a PIN, so the node authenticates to Polaris and installs the VMS.
+# Skip with REGISTER_POLARIS=0 to fall back to the (broken) bare create.
+REG_SH="$(dirname "${BASH_SOURCE[0]}")/polaris-register.sh"
+if [[ "${REGISTER_POLARIS:-1}" == "1" && -f "$REG_SH" ]]; then
+  log "Registering pending cluster in Polaris (API) for a PIN-authenticated deploy"
+  bash "$REG_SH" "$CLUSTER" --region "$REGION" --zone "$ZONE" --nodes "$NODES" \
+    ${INSTANCE_TYPE:+--instance-type "$INSTANCE_TYPE"}
+fi
+
+# ---- 6b. create ----
 ARGS=(cluster create "$CLUSTER" --provider aws --region "$REGION" --zone "$ZONE"
       --subnet "$SUBNET" --aws-security-group-ids "$SG"
       --nodes "$NODES" --auto-allocate-vips --non-interactive --force)
+# --select picks up the pending cluster registered above and fetches its PIN
+# automatically (the fix for the --skip-polaris bootstrap failure).
+[[ "${REGISTER_POLARIS:-1}" == "1" ]] && ARGS+=(--select)
 [[ -n "$INSTANCE_TYPE" ]] && ARGS+=(--instance-type "$INSTANCE_TYPE")
 [[ "$RUN_PREFLIGHT" == "0" ]] && ARGS+=(--skip-checker)
 
@@ -145,6 +158,19 @@ echo "    $VASTCLOUD ${ARGS[*]}"
 if [[ -n "${STATE_BUCKET:-}" && -d "$CLUSTER_DIR" ]]; then
   log "Persisting cluster state -> s3://$STATE_BUCKET/$CLUSTER/"
   aws s3 sync "$CLUSTER_DIR/" "s3://$STATE_BUCKET/$CLUSTER/" --region "$REGION" --delete
+fi
+
+# ---- 8. HEALTH GATE: a "running" cluster is not necessarily a USABLE one.
+# vastcloud reports success on cluster-create + Polaris state, but does NOT verify
+# the VMS is reachable/serving — the VIP ENI can be detached or in the VPC default
+# SG, leaving the VMS unreachable (and every CSI CreateVolume failing). Assert it
+# here so the pipeline goes red on an unusable cluster instead of silently passing.
+# Runs in-VPC (CodeBuild). Skip with VALIDATE_VOC=0 for a control-plane-only deploy.
+if [[ "${VALIDATE_VOC:-1}" == "1" ]]; then
+  VAL="$(dirname "${BASH_SOURCE[0]}")/validate-voc.sh"
+  log "Validating VoC data path (VMS reachable + serving)"
+  bash "$VAL" "$CLUSTER" --profile "$PROFILE" --region "$REGION" ${SG:+--sg "$SG"} \
+    || die "VoC deployed but VMS is not serving — see validation output above"
 fi
 
 log "Done. Cluster info:"

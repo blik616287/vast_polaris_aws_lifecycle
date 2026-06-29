@@ -1,0 +1,26 @@
+# vast-cosi layer values — full pack values.yaml with VMS details wired to
+# Palette variables. Mirrors testpacks/vast-cosi-2.6.5/values.yaml.
+pack:
+  content:
+    # 0/0 scan surface — build-on-deploy (see the pack's values.yaml comment).
+    images:
+      - image: cgr.dev/chainguard/wolfi-base:latest
+      - image: vastdataorg/csi:v2.6.5
+  namespace: vast-cosi
+
+charts:
+  vastcosi:
+    endpoint: "{{.spectro.var.vmsEndpoint}}"
+    verifySsl: false
+    secretName: "vast-mgmt"
+    cosiDriverName: "csi.vastdata.com"
+
+    bucketClassDefaults:
+      vipPool: "{{.spectro.var.vastVipPool}}"
+      scheme: "https"
+
+    # Default BucketClass wired to the tenant VIP pool. storagePath is required.
+    bucketClasses:
+      vastdata-bucket:
+        vipPool: "{{.spectro.var.vastVipPool}}"
+        storagePath: "{{.spectro.var.vastStoragePath}}"

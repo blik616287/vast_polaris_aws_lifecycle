@@ -1,0 +1,43 @@
+# vast-block layer values — full pack values.yaml with VMS details wired to
+# Palette variables. Mirrors testpacks/vast-block-2.6.5/values.yaml.
+pack:
+  content:
+    # 0/0 scan surface — build-on-deploy (see the pack's values.yaml comment).
+    images:
+      - image: cgr.dev/chainguard/wolfi-base:latest
+      - image: vastdataorg/csi:v2.6.5
+  namespace: vast-block
+  namespaceLabels:
+    "vast-block": "pod-security.kubernetes.io/enforce=privileged"
+
+charts:
+  vastblock:
+    endpoint: "{{.spectro.var.vmsEndpoint}}"
+    verifySsl: false
+    secretName: "vast-mgmt"
+    blockHostsAutoPrune: true
+    hostNamePrefix: ""
+
+    storageClassDefaults:
+      secretName: "vast-mgmt"
+      vipPool: "{{.spectro.var.vastVipPool}}"
+      vipPoolFQDN: ""
+      vipPoolFQDNRandomPrefix: true
+      # AWS supports NVMe over TCP only.
+      transportType: "TCP"
+      fsType: "ext4"
+      allowVolumeExpansion: true
+      reclaimPolicy: "Delete"
+
+    # Default block StorageClass wired to the tenant VIP pool + the NVMe subsystem.
+    # The 'subsystem' must match a VAST view with protocols:["BLOCK"] of the same name
+    # (created by vast-tenancy terraform / vastdata_view). NVMe-TCP also needs the VAST
+    # SG to allow the discovery port 8009 (voc/terraform vast_nvme_ports). Non-default
+    # (csi NFS is the default class).
+    storageClasses:
+      vastdata-block:
+        subsystem: "{{.spectro.var.vastBlockSubsystem}}"
+        vipPool: "{{.spectro.var.vastVipPool}}"
+        transportType: "TCP"
+        fsType: "ext4"
+        setDefaultStorageClass: false

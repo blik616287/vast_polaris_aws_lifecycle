@@ -1,0 +1,51 @@
+# vast-csi layer values — full pack values.yaml with VMS connection details
+# wired to Palette profile variables ({{.spectro.var.*}}). Palette renders these
+# at cluster-deploy time, so no VMS endpoint/credentials are baked into the
+# published profile. Mirrors testpacks/vast-csi-2.6.5/values.yaml.
+pack:
+  content:
+    # 0/0 scan surface — build-on-deploy (see the pack's values.yaml comment).
+    images:
+      - image: cgr.dev/chainguard/wolfi-base:latest
+      - image: vastdataorg/csi:v2.6.5
+  namespace: vast-csi
+  # The CSI node plugin requires privileged pods to perform mounts.
+  namespaceLabels:
+    "vast-csi": "pod-security.kubernetes.io/enforce=privileged"
+
+charts:
+  vastcsi:
+    # VMS host -- BARE host/IP, NO scheme (driver parses a scheme as the hostname).
+    # Supplied per-cluster via the vmsEndpoint profile variable.
+    endpoint: "{{.spectro.var.vmsEndpoint}}"
+    verifySsl: false
+    # Credentials secret created by the "vast-mgmt-secret" manifest layer.
+    secretName: "vast-mgmt"
+
+    storageClassDefaults:
+      secretName: "vast-mgmt"
+      # Base view path on VAST where CSI volumes are created.
+      storagePath: "{{.spectro.var.vastStoragePath}}"
+      # VIP pool (tenant data path). vipPoolFQDNRandomPrefix load-balances CNodes.
+      vipPool: "{{.spectro.var.vastVipPool}}"
+      vipPoolFQDN: ""
+      vipPoolFQDNRandomPrefix: true
+      viewPolicy: "{{.spectro.var.vastViewPolicy}}"
+      allowVolumeExpansion: true
+      reclaimPolicy: "Delete"
+      qosPolicy: "{{.spectro.var.vastQosPolicy}}"
+      # Cloud/VoC data path is TCP-only (no NFSoRDMA on AWS): multi-stream mounts.
+      mountOptions:
+        - vers=3
+        - proto=tcp
+        - nolock
+        - nconnect=16
+
+    # Default StorageClass wired to the tenant VIP pool / view path above.
+    storageClasses:
+      vastdata-filesystem:
+        storagePath: "{{.spectro.var.vastStoragePath}}"
+        vipPool: "{{.spectro.var.vastVipPool}}"
+        viewPolicy: "{{.spectro.var.vastViewPolicy}}"
+        qosPolicy: "{{.spectro.var.vastQosPolicy}}"
+        setDefaultStorageClass: true

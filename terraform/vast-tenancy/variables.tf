@@ -53,13 +53,14 @@ variable "qos_tiers" {
 variable "tenants" {
   description = "Palette tenant -> VAST tenant + VIP pool + QoS + NFS view."
   type = map(object({
-    client_ip_ranges = list(list(string)) # [["start","end"]] worker source IPs
-    vip_ip_ranges    = list(list(string)) # [["start","end"]] data VIPs for this tenant
-    subnet_cidr      = number             # CIDR prefix length of the data network
-    qos_tier         = string             # key into qos_tiers
-    storage_path     = string             # base Element Store path for the view
-    nfs_read_write   = list(string)       # client CIDRs allowed RW on the view
-    vlan             = optional(number)   # optional VLAN tag for network isolation
+    client_ip_ranges = list(list(string))   # [["start","end"]] worker source IPs
+    vip_ip_ranges    = list(list(string))   # [["start","end"]] data VIPs for this tenant
+    subnet_cidr      = number               # CIDR prefix length of the data network
+    qos_tier         = string               # key into qos_tiers
+    storage_path     = string               # base Element Store path for the view
+    nfs_read_write   = list(string)         # client CIDRs allowed RW on the view
+    vlan             = optional(number)     # optional VLAN tag for network isolation
+    block_subsystem  = optional(string, "") # NVMe-TCP subsystem (BLOCK view) name; "" = none. Must equal the vast-block StorageClass `subsystem` (profile var vastBlockSubsystem).
   }))
   default = {
     # team-alpha = {

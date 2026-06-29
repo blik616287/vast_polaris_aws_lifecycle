@@ -31,19 +31,60 @@ if [[ -n "${STATE_BUCKET:-}" ]] && aws s3 ls "s3://$STATE_BUCKET/$CLUSTER/cluste
   echo "==> Restoring cluster state from s3://$STATE_BUCKET/$CLUSTER/ -> $CLUSTER_DIR"
   mkdir -p "$CLUSTER_DIR"
   aws s3 sync "s3://$STATE_BUCKET/$CLUSTER/" "$CLUSTER_DIR/" --region "$REGION"
+  # `aws s3 sync` does NOT preserve the executable bit. Restore +x on EVERYTHING
+  # the vast CLI's `terraform destroy` execs, or it aborts and orphans resources:
+  #   - provider plugins (.terraform/providers/.../terraform-provider-*) -> else
+  #     "failed to instantiate provider ... fork/exec ..." (exit on schema load);
+  #   - the module's SHELL SCRIPTS (e.g. scripts/download_latest_voctool.sh, run
+  #     by a destroy-time local-exec) -> else exit 126 "Permission denied",
+  #     aborting the destroy mid-way and leaving log groups / other resources.
+  find "$CLUSTER_DIR" -type f \( -name '*.sh' -o -name 'terraform-provider-*' \) -exec chmod +x {} + 2>/dev/null || true
 elif [[ ! -f "$CLUSTER_DIR/cluster.json" ]]; then
   echo "==> No persisted state for '$CLUSTER' and none local — assuming already destroyed. Nothing to do."
   exit 0
 fi
 
-echo "==> Deleting cluster '$CLUSTER' via vast CLI (terminates the node, then removes its state bucket)"
-"$VASTCLOUD" cluster delete "$CLUSTER" --non-interactive --force --delete-state-bucket
-
-# Clean up the persisted copy now that the cluster is gone.
+# ARCHIVE the tf state bucket + cluster config for HISTORICAL RECORDS *before*
+# the delete. We don't pass --delete-state-bucket, but vastcloud still removes
+# s3://vast-cluster-<name> under --non-interactive — so copy it (and the persisted
+# config) into a retained, timestamped archive prefix first. This is also the
+# recovery record if a future destroy partially fails.
 if [[ -n "${STATE_BUCKET:-}" ]]; then
-  aws s3 rm "s3://$STATE_BUCKET/$CLUSTER/" --recursive --region "$REGION" >/dev/null 2>&1 || true
+  TS="$(date -u +%Y%m%d-%H%M%S)"
+  ARCH="s3://$STATE_BUCKET/archive/$CLUSTER-$TS"
+  echo "==> Archiving tf state + config for records -> $ARCH/"
+  aws s3 sync "s3://vast-cluster-$CLUSTER/" "$ARCH/tfstate/" --region "$REGION" >/dev/null 2>&1 || true
+  aws s3 sync "s3://$STATE_BUCKET/$CLUSTER/" "$ARCH/config/"  --region "$REGION" >/dev/null 2>&1 || true
 fi
-echo "==> Cluster '$CLUSTER' deleted."
+
+echo "==> Deleting cluster '$CLUSTER' via vast CLI (destroys the cluster's AWS resources)"
+"$VASTCLOUD" cluster delete "$CLUSTER" --non-interactive --force
+
+# The node's CloudWatch agent auto-creates "<cluster>-log-group-<id>", which is NOT
+# in the cluster's terraform state — so `terraform destroy` leaves it behind (one
+# accumulates per deploy). Clean it for a complete teardown.
+for lg in $(aws logs describe-log-groups --region "$REGION" \
+    --log-group-name-prefix "${CLUSTER}-log-group" \
+    --query 'logGroups[].logGroupName' --output text 2>/dev/null); do
+  aws logs delete-log-group --region "$REGION" --log-group-name "$lg" 2>/dev/null \
+    && echo "    cleaned node CloudWatch log group $lg"
+done
+
+# Post-delete VERIFICATION (don't trust the vast CLI's exit code — it ran under
+# --force and has silently left orphans before). FAIL LOUDLY if billing-capable
+# resources survived, so a partial teardown is never reported as success.
+echo "==> Verifying clean teardown"
+LEFT_INST="$(aws ec2 describe-instances --region "$REGION" \
+  --filters "Name=tag:cluster_name,Values=$CLUSTER" "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+  --query 'length(Reservations[].Instances[])' --output text 2>/dev/null || echo 0)"
+if [[ "${LEFT_INST:-0}" != "0" ]]; then
+  echo "ERROR: teardown left $LEFT_INST instance(s) for '$CLUSTER' — NOT a clean delete." >&2; exit 1
+fi
+echo "    no surviving instances for '$CLUSTER'"
+
+echo "==> Cluster '$CLUSTER' destroyed. Retained for records:"
+echo "      tf state : s3://vast-cluster-$CLUSTER/"
+[[ -n "${STATE_BUCKET:-}" ]] && echo "      config   : s3://$STATE_BUCKET/$CLUSTER/"
 
 if [[ "$ALSO_NETWORK" == "1" ]]; then
   cat <<EOF

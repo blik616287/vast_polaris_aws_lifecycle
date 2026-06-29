@@ -56,3 +56,19 @@ resource "vastdata_view" "this" {
   protocols     = ["NFS"]
   create_dir    = true
 }
+
+# Block (NVMe-TCP) subsystem view per tenant (only when block_subsystem is set).
+# The vast-block StorageClass's `subsystem` param MUST equal this view's NAME — VAST
+# auto-names views "view-N" otherwise and the driver looks the subsystem up by name
+# (CreateVolume errors "No 'view' found for params {name:<subsystem>}"). NVMe-TCP also
+# requires the VAST SG to allow the discovery port 8009 (voc/terraform vast_nvme_ports);
+# without it the driver's `nvme connect-all` (default port 8009) times out.
+resource "vastdata_view" "block" {
+  for_each   = { for k, v in var.tenants : k => v if try(v.block_subsystem, "") != "" }
+  name       = each.value.block_subsystem
+  path       = "/${each.value.block_subsystem}"
+  policy_id  = vastdata_view_policy.this[each.key].id
+  tenant_id  = vastdata_tenant.this[each.key].id
+  protocols  = ["BLOCK"]
+  create_dir = true
+}

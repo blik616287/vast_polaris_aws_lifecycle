@@ -1,0 +1,330 @@
+[
+  {
+    "name": "K8sNodeCIDR",
+    "displayName": "CIDR of the subnet the Kubernetes nodes should run on",
+    "description": "This value will be used to find the IP address of each node within the given CIDR and set the --node-ip parameter of the Kubelet to that IP address.",
+    "format": "ipv4cidr",
+    "required": true,
+    "defaultValue": "172.16.0.0/16",
+    "immutable": false,
+    "hidden": false,
+    "isSensitive": false,
+    "order": "1779964217240069904216",
+    "inputType": "text"
+  },
+  {
+    "name": "K8sPodCIDR",
+    "displayName": "Kubernetes pod CIDR",
+    "description": "CIDR used for the Kubernetes pod network",
+    "format": "ipv4cidr",
+    "required": true,
+    "defaultValue": "100.64.0.0/18",
+    "immutable": true,
+    "hidden": false,
+    "isSensitive": false,
+    "order": "1779964217240079797832",
+    "inputType": "text"
+  },
+  {
+    "name": "K8sServiceCIDR",
+    "displayName": "Kubernetes service CIDR",
+    "description": "CIDR used for the Kubernetes pod network",
+    "format": "ipv4cidr",
+    "required": true,
+    "defaultValue": "100.64.64.0/18",
+    "immutable": true,
+    "hidden": false,
+    "isSensitive": false,
+    "order": "1779964217240082687504",
+    "inputType": "text"
+  },
+  {
+    "name": "systemReservedCPU",
+    "displayName": "Reserved CPUs for kubelet and system",
+    "description": "Set of CPUs to reserve for the kubelet and OS system daemons. The CPU capacity reported by Kubelet for the node will be reduced by this amount. Reserve 8 CPUs when using Portworx Enterprise, otherwise reserve 4 CPUs.",
+    "format": "string",
+    "required": false,
+    "regex": "\\d-\\d",
+    "defaultValue": "0-3",
+    "immutable": false,
+    "hidden": false,
+    "isSensitive": false,
+    "order": "1779964217240085560440",
+    "inputType": "text"
+  },
+  {
+    "name": "UpdatePackages",
+    "displayName": "Update OS packages during nodeprep",
+    "description": "Runs \"apt upgrade\" during the first node prep stage",
+    "format": "boolean",
+    "required": true,
+    "defaultValue": "true",
+    "immutable": false,
+    "hidden": false,
+    "isSensitive": false,
+    "order": "1779964217240087988744",
+    "inputType": "text"
+  },
+  {
+    "name": "NodeprepCP",
+    "displayName": "Also perform node prep on control plane nodes",
+    "description": "Install DOCA drivers and configure Bluefield/ConnectX NICs on control plane nodes as well.",
+    "format": "boolean",
+    "required": true,
+    "defaultValue": "false",
+    "immutable": false,
+    "hidden": false,
+    "isSensitive": false,
+    "order": "1779964217240090709712",
+    "inputType": "text"
+  },
+  {
+    "name": "MaaSURI",
+    "displayName": "MaaS TFTP URL",
+    "format": "string",
+    "required": true,
+    "defaultValue": "https://kevin-s3-public.s3.eu-west-1.amazonaws.com",
+    "immutable": false,
+    "hidden": false,
+    "isSensitive": false,
+    "order": "1779964217240094970720",
+    "inputType": "text"
+  },
+  {
+    "name": "DocaDebFile",
+    "displayName": "DOCA local DEB file",
+    "description": "DOCA .deb file on the MAAS server in /rcp",
+    "format": "string",
+    "required": true,
+    "defaultValue": "doca-host_3.3.0-088000-26.01-ubuntu2404_amd64.deb",
+    "immutable": false,
+    "hidden": false,
+    "isSensitive": false,
+    "order": "1779964217240097484736",
+    "inputType": "text"
+  },
+  {
+    "name": "BfbBundle",
+    "displayName": "BFB bundle",
+    "description": "BFB bundle file in /rcp/firmware/bfb on MAAS server",
+    "format": "string",
+    "required": true,
+    "defaultValue": "bf-fwbundle-3.3.0-202_26.01-prod.bfb",
+    "immutable": false,
+    "hidden": false,
+    "isSensitive": false,
+    "order": "1779964217240100146152",
+    "inputType": "text"
+  },
+  {
+    "name": "BFBFW",
+    "displayName": "BFB Firmware Version",
+    "description": "Firmware version flashed by the BFB file",
+    "format": "string",
+    "required": true,
+    "defaultValue": "32.48.1000",
+    "immutable": false,
+    "hidden": false,
+    "isSensitive": false,
+    "order": "1779964217240103764128",
+    "inputType": "text"
+  },
+  {
+    "name": "EnableSRIOV",
+    "displayName": "Use SR-IOV",
+    "description": "Enables hardware-isolated networking using VFs, at a 20% performance penalty. Do not use in combination with GPUDirect Storage.",
+    "format": "boolean",
+    "required": true,
+    "defaultValue": "false",
+    "immutable": false,
+    "hidden": false,
+    "isSensitive": false,
+    "order": "1779964217240106325336",
+    "inputType": "text"
+  },
+  {
+    "name": "LinkType_EW",
+    "displayName": "Physical Link Type for East-West traffic",
+    "format": "string",
+    "required": true,
+    "defaultValue": "Ethernet",
+    "immutable": false,
+    "hidden": false,
+    "isSensitive": false,
+    "order": "1779964217240110059920",
+    "inputType": "dropdown",
+    "options": [
+      {
+        "label": "Infiniband",
+        "value": "Infiniband"
+      },
+      {
+        "label": "Ethernet",
+        "value": "Ethernet",
+        "default": true
+      }
+    ]
+  },
+  {
+    "name": "railsPCIAddresses",
+    "displayName": "GPU Fabric rail PCI addresses",
+    "description": "PCI addresses for the east-west NICs that make up the GPU fabric rails. The first line is rail 0, the next entry rail 1, etc.",
+    "format": "string",
+    "required": false,
+    "immutable": false,
+    "hidden": false,
+    "isSensitive": false,
+    "order": "1779964217240112800944",
+    "inputType": "text"
+  },
+  {
+    "name": "numberOfVFs",
+    "displayName": "Number of SuperNIC VFs",
+    "description": "Number of VFs to create on each SuperNIC for east-west traffic. Requires SR-IOV to be enabled in the BIOS. Ignored when \u201cUse SR-IOV\u201d setting is disabled.",
+    "format": "number",
+    "required": true,
+    "defaultValue": "0",
+    "immutable": false,
+    "hidden": false,
+    "isSensitive": false,
+    "order": "1779964217240115488520",
+    "inputType": "text"
+  },
+  {
+    "name": "ControlDPUs",
+    "displayName": "Also flash and configure DPUs",
+    "description": "Enable to flash DPU firmware, set link type and control offload engine",
+    "format": "boolean",
+    "required": true,
+    "defaultValue": "false",
+    "immutable": false,
+    "hidden": false,
+    "isSensitive": false,
+    "order": "17799642172401182348",
+    "inputType": "text"
+  },
+  {
+    "name": "DPUOffloadEngine",
+    "displayName": "Enable DPU Compute Offload Engine",
+    "format": "boolean",
+    "required": true,
+    "defaultValue": "false",
+    "immutable": false,
+    "hidden": false,
+    "isSensitive": false,
+    "order": "1779964217240122508120",
+    "inputType": "text"
+  },
+  {
+    "name": "LinkType_NS",
+    "displayName": "Physical Link Type for North-South traffic",
+    "format": "string",
+    "required": true,
+    "defaultValue": "Ethernet",
+    "immutable": false,
+    "hidden": false,
+    "isSensitive": false,
+    "order": "1779964217240125886144",
+    "inputType": "dropdown",
+    "options": [
+      {
+        "label": "Infiniband",
+        "value": "Infiniband"
+      },
+      {
+        "label": "Ethernet",
+        "value": "Ethernet",
+        "default": true
+      }
+    ]
+  },
+  {
+    "name": "numberofDPUVFs",
+    "displayName": "Number of DPU VFs",
+    "description": "Number of VFs to create on each DPU for north-south traffic. Requires SR-IOV to be enabled in the BIOS. Ignored when \u201cUse SR-IOV\u201d setting is disabled.",
+    "format": "number",
+    "required": true,
+    "defaultValue": "0",
+    "immutable": false,
+    "hidden": false,
+    "isSensitive": false,
+    "order": "1779964217240128392328",
+    "inputType": "text"
+  },
+  {
+    "name": "hugePagesDefault",
+    "displayName": "Default Hugepages size",
+    "format": "string",
+    "required": false,
+    "defaultValue": "2 MB",
+    "immutable": false,
+    "hidden": false,
+    "isSensitive": false,
+    "order": "1779964217240131645760",
+    "inputType": "dropdown",
+    "options": [
+      {
+        "label": "2 MB",
+        "value": "2M",
+        "default": true
+      },
+      {
+        "label": "1 GB",
+        "value": "1G"
+      }
+    ]
+  },
+  {
+    "name": "hugePages2M",
+    "displayName": "Number of 2MB huge pages to create",
+    "description": "Leave at 0 to not create 2M hugepages",
+    "format": "string",
+    "required": false,
+    "regex": "^\\d+$",
+    "defaultValue": "0",
+    "immutable": false,
+    "hidden": false,
+    "isSensitive": false,
+    "order": "1779964217240134311880",
+    "inputType": "text"
+  },
+  {
+    "name": "hugePages1G",
+    "displayName": "Number of 1GB huge pages to create",
+    "description": "Leave at 0 to not create 1G hugepages",
+    "format": "string",
+    "required": false,
+    "regex": "^\\d+$",
+    "defaultValue": "0",
+    "immutable": false,
+    "hidden": false,
+    "isSensitive": false,
+    "order": "177996421724013693264",
+    "inputType": "text"
+  },
+  {
+    "name": "disableACS",
+    "displayName": "Disable PCIe ACS",
+    "description": "When SRIOV is not used, you can disable ACS for maximum PCIe performance.",
+    "format": "boolean",
+    "required": true,
+    "defaultValue": "false",
+    "immutable": false,
+    "hidden": false,
+    "isSensitive": false,
+    "order": "1779964217240139734336"
+  },
+  {
+    "name": "NFSORDMA_ENABLED",
+    "displayName": "Enable NFS over RDMA",
+    "description": "Enable this option if you want to use RDMA-accelerated remote NFS storage",
+    "format": "boolean",
+    "required": true,
+    "defaultValue": "false",
+    "immutable": false,
+    "hidden": false,
+    "isSensitive": false,
+    "order": "1779964217240142426504",
+    "inputType": "text"
+  }
+]

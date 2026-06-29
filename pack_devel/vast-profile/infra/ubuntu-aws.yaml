@@ -1,0 +1,103 @@
+kubeadmconfig:
+  files:
+  - content: '[Unit]
+
+      Description=Fence resources slice for Kubernetes services
+
+      Documentation=man:systemd.special(7)
+
+      DefaultDependencies=no
+
+      Before=slices.target
+
+      Requires=-.slice
+
+      After=-.slice
+
+      [Service]
+
+      CPUAccounting=true
+
+      AllowedCPUs={{.spectro.var.systemReservedCPU}}'
+    targetOwner: root:root
+    targetPath: /etc/systemd/system/kube.slice
+    targetPermissions: '0644'
+  - content: '[Service]
+
+      Slice=kube.slice'
+    targetOwner: root:root
+    targetPath: /etc/systemd/system/containerd.service.d/10-cgroup.conf
+    targetPermissions: '0644'
+  - content: '[Service]
+
+      CPUAccounting=true
+
+      MemoryAccounting=true
+
+      Slice=kube.slice'
+    targetOwner: root:root
+    targetPath: /etc/systemd/system/kubelet.service.d/10-cgroup.conf
+    targetPermissions: '0644'
+  - content: 'blacklist nouveau
+
+      blacklist lbm-nouveau
+
+      options nouveau modeset=0
+
+      alias nouveau off
+
+      alias lbm-nouveau off'
+    targetOwner: root:root
+    targetPath: /etc/modprobe.d/blacklist-nouveau.conf
+    targetPermissions: '0644'
+  - content: '[Service]
+
+      # allow children (shims/containers) to inherit unlimited memlock
+
+      LimitMEMLOCK=infinity
+
+      # (optional but common in HPC)
+
+      LimitNOFILE=1048576
+
+      LimitNPROC=infinity'
+    targetOwner: root:root
+    targetPath: /etc/systemd/system/containerd.service.d/override.conf
+    targetPermissions: '0644'
+  - content: "apiVersion: kubelet.config.k8s.io/v1beta1\nkind: KubeletConfiguration\nmaxPods: 250\ncpuManagerPolicy: static\nreservedSystemCPUs: \"{{.spectro.var.systemReservedCPU}}\"\ncpuManagerPolicyOptions:\n  strict-cpu-reservation: \"true\"\nmemoryManagerPolicy: Static\nkubeReserved:\n  memory: 1Gi\n  ephemeral-storage: 5Gi\nsystemReserved:\n  memory: 1Gi\n  ephemeral-storage: 5Gi\nreservedMemory:\n  - numaNode: 0\n    limits:\n      memory: \"2148Mi\" # 2GiB + 100MiB\ntopologyManagerPolicy: best-effort\ntopologyManagerPolicyOptions:\n  prefer-closest-numa-nodes: \"true\""
+    targetOwner: root:root
+    targetPath: /etc/kubernetes/kubelet.conf.d/10-kubelet-tuning.conf
+    targetPermissions: '0644'
+  postKubeadmCommands:
+  - echo "====> Applying post Kubeadm commands"
+  preKubeadmCommands:
+  - echo "====> Applying pre Kubeadm commands"
+  - "apt update && apt install -y grepcidr\nNETWORKS=\"{{ .spectro.var.K8sNodeCIDR }}\"\nIPS=$(hostname -I)\nfor IP in $IPS\ndo\n  echo \"$IP\" | grepcidr \"$NETWORKS\" >/dev/null && echo \" --node-ip=$IP\" >> /etc/default/kubelet\n  if [ $? -eq 0 ]; then break; fi\ndone\n"
+  - apt install -y nfs-common
+  - update-ca-certificates
+  - update-initramfs -u
+  - sed -i '/# contains spectro changes/Q' /etc/containerd/config.toml
+  - systemctl daemon-reload
+  - systemctl restart containerd
+  - 'apt-mark hold $(apt-mark showauto linux-\*image-\*)
+
+    apt-mark hold $(apt-mark showauto linux-\*headers-\*)
+
+    apt-mark hold $(apt-mark showauto linux-\*modules-\*)
+
+    apt-mark hold $(apt-mark showauto linux-\*cloud-tools-\*)
+
+    apt-mark hold $(apt-mark showauto linux-\*tools-\*)
+
+    apt-mark hold $(apt-mark showmanual linux-\*image-\*)
+
+    apt-mark hold $(apt-mark showmanual linux-\*headers-\*)
+
+    apt-mark hold $(apt-mark showmanual linux-\*modules-\*)
+
+    apt-mark hold $(apt-mark showmanual linux-\*cloud-tools-\*)
+
+    apt-mark hold $(apt-mark showmanual linux-\*tools-\*)
+
+    '
+  - "if cat /run/kubeadm/*.yaml | grep -E '^(kind: InitConfiguration|controlPlane:)$'; then\n  rm /etc/kubernetes/kubelet.conf.d/10-kubelet-tuning.conf\n  rm /etc/modprobe.d/nfsclient.conf\nelse\n  systemctl set-property system.slice AllowedCPUs={{.spectro.var.systemReservedCPU}}\nfi\nsystemctl daemon-reload\nsystemctl restart containerd kubelet\n"

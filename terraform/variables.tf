@@ -88,8 +88,14 @@ variable "vast_mgmt_ports" {
 }
 
 variable "vast_nvme_ports" {
-  type    = list(number)
-  default = [4420, 4520]
+  type = list(number)
+  # 4420 = NVMe-oF I/O, 4520 = NVMe-oF (alt), 8009 = NVMe-oF DISCOVERY.
+  # 8009 is REQUIRED for block/NVMe-TCP: the VAST CSI block driver's `nvme
+  # connect-all` contacts the discovery controller on 8009 (per VAST KB
+  # "Configuring an NVMe/TCP Client on Linux"). Without it the driver's connect
+  # times out (NodeStageVolume "Failed to write to /dev/nvme-fabrics: timed out")
+  # even though raw 4420 is reachable.
+  default = [4420, 4520, 8009]
 }
 
 variable "vast_ssh_port" {

@@ -16,3 +16,17 @@ scripts/bin/
 *.tfvars.local
 *.auto.tfvars
 secrets.auto.tfvars
+
+# pack_devel: contains a live Palette API token; pack-central is a large reference clone
+pack_devel/instructions.txt
+pack_devel/pack-central/
+pack_devel/**/charts/*.tgz
+
+# pack_devel/cmargo: CM/Palette SDK example — strip live creds before any commit.
+# notes + that CLAUDE.md carry a literal Palette token; acr-secret.yaml's
+# .dockerconfigjson decodes to the ACR registry password; the cmd/*/main.go files
+# hardcode the same Palette token (+ an edgeHostToken in deploy-cluster).
+pack_devel/cmargo/notes
+pack_devel/cmargo/CLAUDE.md
+pack_devel/cmargo/cluster-profile/argocd/acr-secret.yaml
+pack_devel/cmargo/cluster-profile/cmd/**/main.go
