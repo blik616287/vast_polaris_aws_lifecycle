@@ -10,7 +10,7 @@
   "tenants": [
     {
       "name": "fieldeng",
-      "client_ip_ranges": [["10.20.10.160", "10.20.10.254"]],
+      "client_ip_ranges": [["10.20.16.1", "10.20.31.254"]],
       "vip_ip_ranges":    [["10.20.12.10", "10.20.12.19"]],
       "subnet_cidr": 20,
       "qos_tier": "gold",
