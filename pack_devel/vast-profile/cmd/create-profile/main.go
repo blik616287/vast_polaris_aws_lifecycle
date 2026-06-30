@@ -111,7 +111,13 @@ func main() {
 	// The three VAST add-on layers — resolved from the ISC registry by name.
 	// VAST_PACK_TAG selects the pack version (the iterative release workflow sets
 	// it to the freshly published minor version).
-	vastTag := envOr("VAST_PACK_TAG", "2.6.5")
+	//
+	// Default is the "-4" revision, NOT the base "2.6.5": the base revision does
+	// not bundle the prerequisite CRDs, so vast-csi (VolumeSnapshotClass) and
+	// vast-cosi (BucketClass) fail to install with "ensure CRDs are installed
+	// first". The "-N" revisions bundle snapshot.storage.k8s.io + objectstorage.k8s.io
+	// CRDs (verified: revision -4 installs them and all three packs run green).
+	vastTag := envOr("VAST_PACK_TAG", "2.6.5-4")
 	layers := []packDef{
 		{name: "vast-csi", layer: models.V1PackLayerAddon, tagGlob: vastTag, regUID: iscReg, valuesFile: "packs/vast-csi-values.yaml"},
 		{name: "vast-cosi", layer: models.V1PackLayerAddon, tagGlob: vastTag, regUID: iscReg, valuesFile: "packs/vast-cosi-values.yaml"},
