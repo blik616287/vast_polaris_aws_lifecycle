@@ -18,8 +18,8 @@ variable "cluster_action" {
   default     = "none"
   description = "deploy | destroy | none. Drives the CodeBuild run."
   validation {
-    condition     = contains(["deploy", "destroy", "none"], var.cluster_action)
-    error_message = "cluster_action must be deploy, destroy, or none."
+    condition     = contains(["deploy", "destroy", "tenant", "none"], var.cluster_action)
+    error_message = "cluster_action must be deploy, destroy, tenant, or none."
   }
 }
 
@@ -43,6 +43,12 @@ variable "polaris_secret_id" {
   type        = string
   default     = "vast/polaris"
   description = "Secrets Manager secret id/ARN with JSON {username,password} for Polaris login."
+}
+
+variable "vms_secret_id" {
+  type        = string
+  default     = "vast/vms-admin"
+  description = "Secrets Manager secret id/ARN with JSON {username,password} for the VMS admin (used by the `tenant` action)."
 }
 
 locals {
@@ -81,6 +87,21 @@ resource "aws_s3_bucket_public_access_block" "cluster_state" {
   restrict_public_buckets = true
 }
 
+# ENI SG for the VPC-attached lifecycle CodeBuild. Egress-only: NAT gives Polaris +
+# AWS API reach; the VMS accepts it because vast_cluster_access already allows the
+# 10.20.0.0/16 source on 443 (the CodeBuild ENI lands in aws_subnet.private).
+resource "aws_security_group" "codebuild" {
+  name_prefix = "${local.name_prefix}-codebuild-"
+  description = "CodeBuild ENI egress (in-VPC for the VMS, NAT for Polaris/AWS)."
+  vpc_id      = aws_vpc.vast.id
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
 # ---------------------------------------------------------------------------
 # Source artifact: zip of buildspec + scripts + generated deploy.env (holds the flag)
 # ---------------------------------------------------------------------------
@@ -107,6 +128,16 @@ data "archive_file" "source" {
   source {
     content  = file("${path.module}/../scripts/polaris-register.sh")
     filename = "scripts/polaris-register.sh"
+  }
+  source {
+    content  = file("${path.module}/../scripts/tenant-voc.sh")
+    filename = "scripts/tenant-voc.sh"
+  }
+  # Imperative tenant config — tenant-voc.sh reads it and drives the VMS REST API
+  # directly (no terraform), consistent with the deploy stage.
+  source {
+    content  = file("${path.module}/../tenants.json")
+    filename = "tenants.json"
   }
   source {
     content  = local.deploy_env
@@ -205,6 +236,31 @@ resource "aws_codebuild_project" "voc" {
         value = "${var.polaris_secret_id}:password"
       }
     }
+    # VMS admin creds for the `tenant` action (imperative tenant-voc.sh).
+    dynamic "environment_variable" {
+      for_each = var.vms_secret_id != "" ? [1] : []
+      content {
+        name  = "VMS_USERNAME"
+        type  = "SECRETS_MANAGER"
+        value = "${var.vms_secret_id}:username"
+      }
+    }
+    dynamic "environment_variable" {
+      for_each = var.vms_secret_id != "" ? [1] : []
+      content {
+        name  = "VMS_PASSWORD"
+        type  = "SECRETS_MANAGER"
+        value = "${var.vms_secret_id}:password"
+      }
+    }
+  }
+
+  # VPC-attached so the `tenant` action reaches the private VMS VIP (10.20.x:443).
+  # Private subnets have NAT, so deploy/destroy still reach Polaris + AWS APIs.
+  vpc_config {
+    vpc_id             = aws_vpc.vast.id
+    subnets            = [for s in aws_subnet.private : s.id]
+    security_group_ids = [aws_security_group.codebuild.id]
   }
 
   source {

@@ -16,9 +16,7 @@ kubeadmconfig:
 
       [Service]
 
-      CPUAccounting=true
-
-      AllowedCPUs={{.spectro.var.systemReservedCPU}}'
+      CPUAccounting=true'
     targetOwner: root:root
     targetPath: /etc/systemd/system/kube.slice
     targetPermissions: '0644'
@@ -64,7 +62,7 @@ kubeadmconfig:
     targetOwner: root:root
     targetPath: /etc/systemd/system/containerd.service.d/override.conf
     targetPermissions: '0644'
-  - content: "apiVersion: kubelet.config.k8s.io/v1beta1\nkind: KubeletConfiguration\nmaxPods: 250\ncpuManagerPolicy: static\nreservedSystemCPUs: \"{{.spectro.var.systemReservedCPU}}\"\ncpuManagerPolicyOptions:\n  strict-cpu-reservation: \"true\"\nmemoryManagerPolicy: Static\nkubeReserved:\n  memory: 1Gi\n  ephemeral-storage: 5Gi\nsystemReserved:\n  memory: 1Gi\n  ephemeral-storage: 5Gi\nreservedMemory:\n  - numaNode: 0\n    limits:\n      memory: \"2148Mi\" # 2GiB + 100MiB\ntopologyManagerPolicy: best-effort\ntopologyManagerPolicyOptions:\n  prefer-closest-numa-nodes: \"true\""
+  - content: "apiVersion: kubelet.config.k8s.io/v1beta1\nkind: KubeletConfiguration\nmaxPods: 250\nkubeReserved:\n  memory: 1Gi\n  ephemeral-storage: 5Gi\nsystemReserved:\n  memory: 1Gi\n  ephemeral-storage: 5Gi"
     targetOwner: root:root
     targetPath: /etc/kubernetes/kubelet.conf.d/10-kubelet-tuning.conf
     targetPermissions: '0644'
@@ -100,4 +98,4 @@ kubeadmconfig:
     apt-mark hold $(apt-mark showmanual linux-\*tools-\*)
 
     '
-  - "if cat /run/kubeadm/*.yaml | grep -E '^(kind: InitConfiguration|controlPlane:)$'; then\n  rm /etc/kubernetes/kubelet.conf.d/10-kubelet-tuning.conf\n  rm /etc/modprobe.d/nfsclient.conf\nelse\n  systemctl set-property system.slice AllowedCPUs={{.spectro.var.systemReservedCPU}}\nfi\nsystemctl daemon-reload\nsystemctl restart containerd kubelet\n"
+  - "systemctl daemon-reload\nsystemctl restart containerd kubelet\n"

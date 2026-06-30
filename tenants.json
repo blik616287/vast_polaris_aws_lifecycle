@@ -1,0 +1,32 @@
+{
+  "_comment": "VAST multi-tenancy for the lifecycle CodeBuild `tenant` action (scripts/tenant-voc.sh). Imperative + idempotent, no terraform. One entry per consuming cluster. VIP ranges carved from the VoC data subnet 10.20.0.0/20, avoiding in-use VIPs; reachable by fieldeng directly and spectro over the peering.",
+
+  "qos_tiers": {
+    "bronze": { "max_reads_bw_mbps": 2000,  "max_writes_bw_mbps": 1000,  "max_reads_iops": 50000,  "max_writes_iops": 25000,  "is_gold": false },
+    "silver": { "max_reads_bw_mbps": 6000,  "max_writes_bw_mbps": 3000,  "max_reads_iops": 150000, "max_writes_iops": 75000,  "is_gold": false },
+    "gold":   { "max_reads_bw_mbps": 20000, "max_writes_bw_mbps": 10000, "max_reads_iops": 500000, "max_writes_iops": 250000, "is_gold": true }
+  },
+
+  "tenants": [
+    {
+      "name": "fieldeng",
+      "client_ip_ranges": [["10.20.10.160", "10.20.10.254"]],
+      "vip_ip_ranges":    [["10.20.12.10", "10.20.12.19"]],
+      "subnet_cidr": 20,
+      "qos_tier": "gold",
+      "storage_path": "/fieldeng",
+      "nfs_read_write": ["10.20.0.0/16"],
+      "block_subsystem": "fieldeng-block"
+    },
+    {
+      "name": "spectro",
+      "client_ip_ranges": [["10.30.0.1", "10.30.255.254"]],
+      "vip_ip_ranges":    [["10.20.12.20", "10.20.12.29"]],
+      "subnet_cidr": 20,
+      "qos_tier": "silver",
+      "storage_path": "/spectro",
+      "nfs_read_write": ["10.30.0.0/16"],
+      "block_subsystem": "spectro-block"
+    }
+  ]
+}
