@@ -314,7 +314,13 @@ func vmsVariableValues() []*models.V1SpectroClusterVariable {
 		v("vmsPassword", mustEnv("VMS_PASSWORD")),
 		v("vastVipPool", mustEnv("VAST_VIP_POOL")),
 		v("vastStoragePath", mustEnv("VAST_STORAGE_PATH")),
+		// Per-tenant NFS view policy (<tenant>-policy). The default "default" is the
+		// ROOT-tenant policy — using it provisions CSI/NFS volumes in the root tenant
+		// so a mount over the tenant VIP fails ("No such file or directory"). Multi-
+		// tenant deploys MUST pass VAST_VIEW_POLICY=<tenant>-policy.
 		v("vastViewPolicy", envOr("VAST_VIEW_POLICY", "default")),
+		// Per-tenant S3 view policy (<tenant>-s3-policy) for the vast-cosi BucketClass.
+		v("vastS3Policy", mustEnv("VAST_S3_POLICY")),
 		// vast-block NVMe-TCP subsystem = the VAST view name (protocols:["BLOCK"])
 		// created by vast-tenancy; default matches the tenancy default.
 		v("vastBlockSubsystem", envOr("VAST_BLOCK_SUBSYSTEM", "k8s-block")),

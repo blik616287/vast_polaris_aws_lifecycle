@@ -15,7 +15,16 @@
 set -euo pipefail
 
 CFG="${1:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tenants.json}"
-VMS="https://${VMS_HOST:-10.20.9.141}:${VMS_PORT:-443}/api"
+# VMS VIP: prefer an explicit VMS_HOST, else the endpoint validate-voc.sh persisted
+# to SSM after the VoC deploy (so this auto-targets a freshly redeployed VoC), else
+# the well-known default. CLUSTER_NAME comes from deploy.env in CodeBuild.
+: "${CLUSTER_NAME:=voc-fieldeng}"
+if [ -z "${VMS_HOST:-}" ]; then
+  VMS_HOST=$(aws ssm get-parameter --name "/voc/${CLUSTER_NAME}/vms-endpoint" \
+    --region "${AWS_REGION:-${REGION:-us-east-2}}" --query 'Parameter.Value' --output text 2>/dev/null || true)
+fi
+VMS_HOST="${VMS_HOST:-10.20.9.141}"
+VMS="https://${VMS_HOST}:${VMS_PORT:-443}/api"
 : "${VMS_USERNAME:?VMS_USERNAME required (Secrets Manager vast/vms-admin:username)}"
 : "${VMS_PASSWORD:?VMS_PASSWORD required (Secrets Manager vast/vms-admin:password)}"
 
@@ -32,12 +41,25 @@ post() { curl -sk -H "Authorization: Bearer $TOKEN" -H 'Content-Type: applicatio
 # GET by the query first; create only if not present (idempotent).
 ensure() {
   local ep="$1" query="$2" body="$3" label="${4:-$ep}"
+  # Array-safe lookup: the VMS returns either a bare array or {results:[...]}.
+  # NOTE: a naive '.[0].id // .results[0].id' errors on an EMPTY array (the
+  # fallback evaluates .results against an array), aborting under pipefail.
   local id
-  id=$(g "${ep}/?${query}" | jq -r '(.[0].id // .results[0].id) // empty' 2>/dev/null)
+  id=$(g "${ep}/?${query}" 2>/dev/null | jq -r '(if type=="array" then .[0] else .results[0] end | .id) // empty' 2>/dev/null || true)
   if [ -n "$id" ]; then echo "    = $label exists (id=$id)" >&2; echo "$id"; return; fi
-  local resp; resp=$(post "${ep}/" "$body")
-  id=$(echo "$resp" | jq -r '.id // empty' 2>/dev/null)
-  [ -n "$id" ] || { echo "    ! $label create failed: $(echo "$resp" | jq -rc '.detail // .' 2>/dev/null)" >&2; exit 1; }
+  # Retry transient failures: a freshly-deployed VMS answers its REST API (200)
+  # several minutes before its data-write services accept writes, so the first
+  # creates can fail with a connection error. Retry up to ~60s before giving up.
+  local resp tries=0
+  while [ "$tries" -lt 6 ]; do
+    resp=$(post "${ep}/" "$body" 2>/dev/null || true)
+    id=$(printf '%s' "$resp" | jq -r '.id // empty' 2>/dev/null || true)
+    [ -n "$id" ] && break
+    tries=$((tries + 1))
+    echo "    ~ $label not ready yet, retry $tries/6..." >&2
+    sleep 10
+  done
+  [ -n "$id" ] || { echo "    ! $label create failed: $(printf '%s' "$resp" | jq -rc '.detail // .' 2>/dev/null)" >&2; exit 1; }
   echo "    + $label created (id=$id)" >&2; echo "$id"
 }
 
@@ -64,6 +86,17 @@ jq -c '.tenants[]' "$CFG" | while read -r t; do
   pid=$(ensure viewpolicies "name=${name}-policy" \
     "$(jq -c --argjson tid "$tid" --arg n "${name}-policy" \
       '{name:$n, flavor:"NFS", nfs_read_write:.nfs_read_write, tenant_id:$tid}' <<<"$t")" "view-policy")
+
+  # S3-Native view policy for COSI/object storage. The vast-cosi BucketClass's
+  # `view_policy` parameter points here; the bucket's tenant is taken from this
+  # policy's tenant_id (so buckets land in THIS tenant). Unique name per tenant —
+  # the COSI driver looks the policy up by name as cluster-admin (sees all tenants),
+  # so a shared name like `s3_default_policy` would be ambiguous. See the
+  # vast-cosi-multitenancy memory: COSI also needs the driver patch that passes
+  # tenant_id when creating the per-tenant S3 access key.
+  ensure viewpolicies "name=${name}-s3-policy" \
+    "$(jq -c --argjson tid "$tid" --arg n "${name}-s3-policy" \
+      '{name:$n, flavor:"S3_NATIVE", tenant_id:$tid}' <<<"$t")" "s3-view-policy" >/dev/null
 
   path=$(jq -r '.storage_path' <<<"$t")
   ensure views "path=${path}" \

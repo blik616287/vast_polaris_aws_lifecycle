@@ -15,12 +15,30 @@ charts:
     secretName: "vast-mgmt"
     cosiDriverName: "csi.vastdata.com"
 
+    # PATCHED driver image. Stock vastdataorg/csi:v2.6.5 has a bug: it discards the
+    # tenant from bucket_id and creates the S3 access key with no tenant context, so
+    # the key lands in the DEFAULT tenant and S3 requests to the tenant VIP fail with
+    # InvalidAccessKeyId. The patched image passes tenant_id in the access_keys body.
+    # See the vast-cosi-multitenancy memory. Report the 2-line fix upstream to VAST;
+    # drop this override once a fixed release ships. Needs an ECR pull secret (below).
+    image:
+      csiVastPlugin:
+        repository: 211476615597.dkr.ecr.us-east-2.amazonaws.com/vast-cosi-driver
+        tag: v2.6.5-tenant
+
+    imagePullSecrets:
+      - name: ecr-cred
+
     bucketClassDefaults:
       vipPool: "{{.spectro.var.vastVipPool}}"
       scheme: "https"
+      # S3-Native view policy created per tenant by scripts/tenant-voc.sh
+      # (<tenant>-s3-policy). The bucket's tenant is taken from this policy.
+      viewPolicy: "{{.spectro.var.vastS3Policy}}"
 
     # Default BucketClass wired to the tenant VIP pool. storagePath is required.
     bucketClasses:
       vastdata-bucket:
         vipPool: "{{.spectro.var.vastVipPool}}"
         storagePath: "{{.spectro.var.vastStoragePath}}"
+        viewPolicy: "{{.spectro.var.vastS3Policy}}"
