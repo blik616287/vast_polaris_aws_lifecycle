@@ -87,6 +87,17 @@ jq -c '.tenants[]' "$CFG" | while read -r t; do
     "$(jq -c --argjson tid "$tid" --arg n "${name}-policy" \
       '{name:$n, flavor:"NFS", nfs_read_write:.nfs_read_write, tenant_id:$tid}' <<<"$t")" "view-policy")
 
+  # S3-Native view policy for COSI/object storage. The vast-cosi BucketClass's
+  # `view_policy` parameter points here; the bucket's tenant is taken from this
+  # policy's tenant_id (so buckets land in THIS tenant). Unique name per tenant —
+  # the COSI driver looks the policy up by name as cluster-admin (sees all tenants),
+  # so a shared name like `s3_default_policy` would be ambiguous. See the
+  # vast-cosi-multitenancy memory: COSI also needs the driver patch that passes
+  # tenant_id when creating the per-tenant S3 access key.
+  ensure viewpolicies "name=${name}-s3-policy" \
+    "$(jq -c --argjson tid "$tid" --arg n "${name}-s3-policy" \
+      '{name:$n, flavor:"S3_NATIVE", tenant_id:$tid}' <<<"$t")" "s3-view-policy" >/dev/null
+
   path=$(jq -r '.storage_path' <<<"$t")
   ensure views "path=${path}" \
     "$(jq -c --argjson tid "$tid" --argjson pid "$pid" --argjson qid "$qid" --arg p "$path" \

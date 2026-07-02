@@ -27,6 +27,26 @@
       "storage_path": "/spectro",
       "nfs_read_write": ["10.30.0.0/16"],
       "block_subsystem": "spectro-block"
+    },
+    {
+      "name": "tenant-1",
+      "client_ip_ranges": [["10.40.0.1", "10.40.255.254"]],
+      "vip_ip_ranges":    [["10.20.12.50", "10.20.12.59"]],
+      "subnet_cidr": 20,
+      "qos_tier": "silver",
+      "storage_path": "/tenant-1",
+      "nfs_read_write": ["10.40.0.0/16"],
+      "block_subsystem": "tenant-1-block"
+    },
+    {
+      "name": "tenant-2",
+      "client_ip_ranges": [["10.50.0.1", "10.50.255.254"]],
+      "vip_ip_ranges":    [["10.20.12.60", "10.20.12.69"]],
+      "subnet_cidr": 20,
+      "qos_tier": "silver",
+      "storage_path": "/tenant-2",
+      "nfs_read_write": ["10.50.0.0/16"],
+      "block_subsystem": "tenant-2-block"
     }
   ]
 }
