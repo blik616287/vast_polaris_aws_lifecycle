@@ -1,0 +1,101 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# VAST COSI / S3 object verification  (driver: csi.vastdata.com)
+#
+# Proves: the vast-cosi driver on THIS cluster provisions an S3 bucket inside
+# the tenant, grants access-key credentials scoped to the tenant, and those
+# credentials can PUT / LIST / GET objects over the tenant's S3 VIP.
+#
+# ── EDIT PER TENANT ─────────────────────────────────────────────────────────
+# COSI buckets are NOT auto-tenant-scoped like NFS/block — the BucketClass must
+# name the tenant's S3-Native view policy + VIP pool + storage path. Set the
+# three parameters below to match the cluster you are testing:
+#
+#   voc-tenant-1 :  view_policy=tenant-1-s3-policy  vip_pool_name=tenant-1-pool  root_export=/tenant-1
+#   voc-tenant-2 :  view_policy=tenant-2-s3-policy  vip_pool_name=tenant-2-pool  root_export=/tenant-2
+#
+# (This file is set for voc-tenant-1. For tenant-2, change all three.)
+#
+#   kubectl apply -f 03-cosi-s3.yaml
+#   kubectl wait --for=condition=complete job/verify-cosi -n default --timeout=300s
+#   kubectl logs -n default job/verify-cosi       # look for "COSI/S3 VERIFY: PASS"
+#   kubectl delete -f 03-cosi-s3.yaml
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: objectstorage.k8s.io/v1alpha1
+kind: BucketClass
+metadata:
+  name: verify-bucketclass
+driverName: csi.vastdata.com
+deletionPolicy: Delete
+parameters:
+  view_policy: "tenant-1-s3-policy"      # <-- EDIT per tenant
+  vip_pool_name: "tenant-1-pool"         # <-- EDIT per tenant
+  root_export: "/tenant-1"               # <-- EDIT per tenant
+  scheme: "https"
+---
+apiVersion: objectstorage.k8s.io/v1alpha1
+kind: BucketAccessClass
+metadata:
+  name: verify-accessclass
+driverName: csi.vastdata.com
+authenticationType: Key
+---
+apiVersion: objectstorage.k8s.io/v1alpha1
+kind: BucketClaim
+metadata: {name: verify-bucket, namespace: default}
+spec:
+  bucketClassName: verify-bucketclass
+  protocols: [S3]
+---
+apiVersion: objectstorage.k8s.io/v1alpha1
+kind: BucketAccess
+metadata: {name: verify-access, namespace: default}
+spec:
+  bucketAccessClassName: verify-accessclass
+  bucketClaimName: verify-bucket
+  credentialsSecretName: verify-cosi-creds   # driver writes the tenant-scoped key here
+  protocol: S3
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: verify-cosi
+  namespace: default
+  labels: {vast-verify: cosi}
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels: {vast-verify: cosi}
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: verify
+          image: public.ecr.aws/docker/library/python:3.12-slim
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -e
+              pip install --quiet --disable-pip-version-check boto3 >/dev/null 2>&1
+              python3 - <<'PY'
+              import json, warnings, urllib3, boto3
+              warnings.simplefilter("ignore"); urllib3.disable_warnings()
+              info = json.load(open("/creds/BucketInfo"))["spec"]
+              s3c  = info["secretS3"]; bucket = info["bucketName"]
+              print("endpoint:", s3c["endpoint"], "  bucket:", bucket)
+              c = boto3.client("s3", endpoint_url=s3c["endpoint"], verify=False,
+                               aws_access_key_id=s3c["accessKeyID"],
+                               aws_secret_access_key=s3c["accessSecretKey"])
+              token = b"vast-cosi-verify-token"
+              c.put_object(Bucket=bucket, Key="verify.txt", Body=token)
+              keys = [o["Key"] for o in c.list_objects_v2(Bucket=bucket).get("Contents", [])]
+              got  = c.get_object(Bucket=bucket, Key="verify.txt")["Body"].read()
+              print("put: verify.txt   list:", keys, "  get:", got.decode())
+              assert got == token, "readback mismatch"
+              print("COSI/S3 VERIFY: PASS")
+              PY
+          volumeMounts:
+            - {name: creds, mountPath: /creds, readOnly: true}
+      volumes:
+        - name: creds
+          secret:
+            secretName: verify-cosi-creds    # pod waits here until access is granted

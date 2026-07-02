@@ -253,6 +253,7 @@ func vmsVariables() []*models.V1Variable {
 		v("vastViewPolicy", "VAST View Policy", "VAST view policy controlling client access for CSI volumes (e.g. default).", false),
 		v("vastQosPolicy", "VAST QoS Policy", "Optional VAST QoS policy applied to CSI StorageClasses (blank = none).", true),
 		v("vastBlockSubsystem", "VAST Block Subsystem", "Name of the VAST view (protocols:[\"BLOCK\"]) used as the NVMe-TCP subsystem for the vast-block StorageClass; created by vast-tenancy terraform. Default k8s-block.", false),
+		v("vastS3Policy", "VAST S3 View Policy", "Name of the tenant's S3-Native view policy (created per tenant by scripts/tenant-voc.sh as <tenant>-s3-policy). The vast-cosi BucketClass uses it so buckets land in THIS tenant. MUST be tenant-scoped, not the root 's3_default_policy'.", false),
 	}
 }
 

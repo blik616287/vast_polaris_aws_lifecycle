@@ -1,0 +1,63 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# VAST NFS / filesystem verification  (StorageClass: vastdata-filesystem)
+#
+# Proves: the vast-csi (NFS) driver on THIS cluster provisions a ReadWriteMany
+# volume from the tenant's VAST view and can read+write it.
+#
+# Tenant scoping is automatic: the driver on each cluster is wired to that
+# cluster's tenant (VMS endpoint + VIP pool + storage path), so this manifest
+# needs NO edits — just apply it against the tenant's cluster.
+#
+#   kubectl apply -f 01-nfs.yaml
+#   kubectl wait --for=condition=complete job/verify-nfs -n default --timeout=180s
+#   kubectl logs -n default job/verify-nfs        # look for "NFS VERIFY: PASS"
+#   kubectl delete -f 01-nfs.yaml                 # clean up / re-run
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: verify-nfs
+  namespace: default
+  labels: {vast-verify: nfs}
+spec:
+  accessModes: [ReadWriteMany]           # NFS supports RWX
+  storageClassName: vastdata-filesystem
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: verify-nfs
+  namespace: default
+  labels: {vast-verify: nfs}
+spec:
+  backoffLimit: 2
+  template:
+    metadata:
+      labels: {vast-verify: nfs}
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: verify
+          image: public.ecr.aws/docker/library/busybox:1.36
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -e
+              TOKEN="nfs-$(cat /proc/sys/kernel/random/uuid)"
+              echo "$TOKEN" > /data/proof.txt
+              sync
+              GOT="$(cat /data/proof.txt)"
+              echo "mount:"; df -h /data | tail -1
+              echo "wrote:  $TOKEN"
+              echo "readback: $GOT"
+              [ "$TOKEN" = "$GOT" ] || { echo "NFS VERIFY: FAIL (mismatch)"; exit 1; }
+              echo "NFS VERIFY: PASS"
+          volumeMounts:
+            - {name: vol, mountPath: /data}
+      volumes:
+        - name: vol
+          persistentVolumeClaim:
+            claimName: verify-nfs
