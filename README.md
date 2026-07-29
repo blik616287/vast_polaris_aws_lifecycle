@@ -126,3 +126,7 @@ The fix is `vastcloud cluster list --include-bucket-discovery` — it scans the 
 - The cluster **VMS** (`https://<VMS-VIP>`) is reachable only from inside the VAST VPC or a peered VPC — configure tenants/VIP-pools/CSI from there (`terraform/vast-tenancy/`). Rotate the default `admin/123456`.
 - **Peering** is off by default. Set `enable_peering=true` + `peer_*` vars to connect an existing EKS/k8s VPC.
 - For CI / shared state, enable the **remote S3 backend** (commented in `versions.tf`) — the state contains the Polaris secret, so keep it encrypted and private.
+
+## License
+
+[MIT](LICENSE) © 2026 Martin Forde <mforde84@gmail.com>, [Blik Labs](https://bliklabs.com).
