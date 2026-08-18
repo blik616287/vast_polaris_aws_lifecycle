@@ -81,3 +81,36 @@ kubectl delete -f 03-cosi-s3.yaml
 - **If a pod is stuck `ContainerCreating`:** for COSI the pod waits for the
   `verify-cosi-creds` secret — check `kubectl describe bucketaccess verify-access`
   (accessGranted should be `true`). For block, check the node has `nvme-tcp`.
+
+## NVMe/TCP node hygiene — the orphan-reaper
+
+**Why block mounts can crawl or hang.** Every block PVC opens an NVMe/TCP session
+(controller) from the node to the VAST block target. A *graceful* pod delete runs
+`NodeUnstageVolume` → `nvme disconnect`. An **ungraceful** removal —
+`kubectl delete pod --force --grace-period=0`, a kubelet/node crash, or an OOM-kill —
+leaves the session **orphaned** (still connected, but its backing VAST namespace is
+gone). Orphans loop forever in kernel NVMe error-recovery, and that thrash wedges
+`blkid`/udev in uninterruptible **D-state** on *every* new block device, so fresh
+mounts crawl for minutes. Signature: `NodeStageVolume … ('Process did not terminate
+within 10 seconds', ['/usr/sbin/blkid', '/dev/nvmeXnY', …])`, pod stuck `ContainerCreating`.
+
+**Prevention, in order:**
+1. **Never `kubectl delete pod --force --grace-period=0` on a pod with a volume.**
+   It skips `NodeUnstageVolume` — the #1 trigger. Always graceful-delete.
+2. **Deploy the orphan-reaper** (durable, self-healing) — a privileged DaemonSet that
+   every 120s disconnects TCP controllers with zero namespaces (two-strike, so it
+   never touches a live or mid-connect volume):
+   ```bash
+   kubectl apply -f ../ops/nvme-tcp-reaper.yaml     # once per VAST-block cluster
+   ```
+3. **Preflight reap** before a demo/benchmark (belt-and-suspenders, or for clusters
+   without the DaemonSet) — one-shot across all nodes:
+   ```bash
+   ../ops/preflight-reap.sh <kubeconfig>
+   ```
+
+**Recovering an ALREADY-wedged node:** once `blkid` is in D-state, even sysfs
+`delete_controller` can hang — the reliable reset is an EC2 reboot of that node
+(clears all NVMe sessions + D-state). The reaper's job is to prevent ever getting
+there. *Measured: a poisoned node took block mounts from ~9s to 4+ minutes; after
+reaping, back to ~9s.*

@@ -1,0 +1,92 @@
+# =============================================================================
+# nvme-tcp-orphan-reaper — node hygiene for VAST NVMe/TCP block storage.
+#
+# THE PROBLEM it prevents:
+#   Every block PVC opens an NVMe/TCP session (controller) from the node to the
+#   VAST block target. A graceful pod delete runs NodeUnstageVolume -> nvme
+#   disconnect. But an UNGRACEFUL removal — `kubectl delete pod --force
+#   --grace-period=0`, a kubelet/node crash, an OOM-kill — leaves the session
+#   ORPHANED: still connected on the node, but its backing VAST namespace is
+#   gone. Orphans then loop forever in kernel NVMe error-recovery, and their
+#   thrash wedges `blkid`/udev in uninterruptible D-state on EVERY new block
+#   device — so fresh block mounts crawl for minutes (or hang).
+#
+# WHAT THIS DOES:
+#   A tiny privileged DaemonSet on every node. Every REAP_INTERVAL it scans
+#   /sys/class/nvme for TCP controllers that present ZERO namespaces (orphans)
+#   and disconnects them via sysfs. TWO-STRIKE: it only reaps a controller that
+#   was ALSO orphaned on the previous pass, so a controller that is merely
+#   mid-connect (briefly 0 namespaces) is never touched. No Kubernetes API
+#   access, no RBAC — it only reads/writes node sysfs.
+#
+# Deploy once per VAST-block cluster:  kubectl apply -f nvme-tcp-reaper.yaml
+# =============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vast-system
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/warn: privileged
+    pod-security.kubernetes.io/audit: privileged
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: nvme-tcp-orphan-reaper
+  namespace: vast-system
+  labels: { app: nvme-tcp-orphan-reaper }
+spec:
+  selector:
+    matchLabels: { app: nvme-tcp-orphan-reaper }
+  template:
+    metadata:
+      labels: { app: nvme-tcp-orphan-reaper }
+    spec:
+      priorityClassName: system-node-critical
+      tolerations:
+        - operator: Exists            # run on EVERY node, incl. control-plane
+      containers:
+        - name: reaper
+          image: public.ecr.aws/docker/library/busybox:1.36
+          securityContext:
+            privileged: true           # required to write /sys/.../delete_controller
+          env:
+            - { name: REAP_INTERVAL, value: "120" }
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits:   { cpu: 50m, memory: 32Mi }
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -u
+              SYS=/host/sys/class/nvme
+              STATE=/tmp/strikes
+              : > "$STATE"
+              echo "$(date -u +%FT%TZ) nvme-tcp orphan-reaper up on $(hostname) — interval ${REAP_INTERVAL}s"
+              while true; do
+                NEW=/tmp/strikes.new; : > "$NEW"
+                for c in "$SYS"/nvme*; do
+                  [ -e "$c/transport" ] || continue
+                  n=$(basename "$c")
+                  # only NVMe/TCP (fabrics) controllers — never PCIe/EBS
+                  [ "$(cat "$c/transport" 2>/dev/null)" = tcp ] || continue
+                  # a controller presenting a namespace is a LIVE volume — skip
+                  if ls -d "$c/${n}n"* >/dev/null 2>&1; then continue; fi
+                  echo "$n" >> "$NEW"
+                  # two-strike: reap only if it was orphaned on the previous pass too
+                  if grep -qx "$n" "$STATE" 2>/dev/null; then
+                    st=$(cat "$c/state" 2>/dev/null)
+                    echo "$(date -u +%FT%TZ) reaping orphan $n (tcp, 0 namespaces, state=$st)"
+                    # background + timeout so a wedged controller can't block the loop
+                    ( timeout 15 sh -c "echo 1 > $c/delete_controller" ) 2>/dev/null &
+                  fi
+                done
+                mv "$NEW" "$STATE" 2>/dev/null
+                sleep "${REAP_INTERVAL:-120}"
+              done
+          volumeMounts:
+            - { name: sys, mountPath: /host/sys }
+      volumes:
+        - name: sys
+          hostPath: { path: /sys }
