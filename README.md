@@ -322,6 +322,11 @@ voc/
 - **CodeBuild role uses `AdministratorAccess`** (vastcloud creates VPC/EC2/CFN/S3/IAM) — scope down once the action set is pinned.
 - Rotate the default VMS `admin/123456`. State contains the Polaris secret — keep the backend encrypted and private.
 
+- **CodeBuild runs *outside* the VPC** — it only calls AWS + Polaris APIs; the VoC pre-checker tests node-to-node connectivity itself.
+- **VMS reachability:** `https://<VMS-VIP>` is reachable only from inside the VAST VPC or a peered VPC — configure tenants/VIP-pools/CSI from there (`terraform/vast-tenancy/`).
+- **Peering** is off by default — set `enable_peering=true` + `peer_*` vars to connect an existing EKS/k8s VPC.
+- For CI / shared state, enable the **remote S3 backend** (commented in `versions.tf`).
+
 ---
 
 ### Companion documents — [`docs/`](docs/)
@@ -329,3 +334,7 @@ voc/
 - **[VALIDATION-PLAN-RESPONSE.md](docs/VALIDATION-PLAN-RESPONSE.md)** — Validation-Plan answers, capability matrix, Palette→VAST control-plane automation.
 - **[ENGAGEMENT-RECORD.md](docs/ENGAGEMENT-RECORD.md)** — what was delivered against the scope, phase-by-phase, with validation evidence.
 - **Rendered PDFs (for sharing):** [SpectroCloud-VAST-Engagement-Record.pdf](docs/SpectroCloud-VAST-Engagement-Record.pdf) (the engagement record) · [VAST-Data-on-Kubernetes.pdf](docs/VAST-Data-on-Kubernetes.pdf) (sales-enablement one-pager).
+
+## License
+
+[MIT](LICENSE) © 2026 Martin Forde <mforde84@gmail.com>, [Blik Labs](https://bliklabs.com).
