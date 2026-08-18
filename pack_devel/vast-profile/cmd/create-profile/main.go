@@ -121,7 +121,11 @@ func main() {
 	layers := []packDef{
 		{name: "vast-csi", layer: models.V1PackLayerAddon, tagGlob: vastTag, regUID: iscReg, valuesFile: "packs/vast-csi-values.yaml"},
 		{name: "vast-cosi", layer: models.V1PackLayerAddon, tagGlob: vastTag, regUID: iscReg, valuesFile: "packs/vast-cosi-values.yaml"},
-		{name: "vast-block", layer: models.V1PackLayerAddon, tagGlob: vastTag, regUID: iscReg, valuesFile: "packs/vast-block-values.yaml"},
+		{name: "vast-block", layer: models.V1PackLayerAddon, tagGlob: vastTag, regUID: iscReg, valuesFile: "packs/vast-block-values.yaml",
+			// The nvme-tcp-orphan-reaper rides WITH the block driver so it's on
+			// every cluster by default and SURVIVES redeploy — otherwise orphaned
+			// NVMe/TCP sessions from ungraceful pod deletes wedge block mounts.
+			manifests: []manifestDef{{name: "nvme-tcp-reaper", file: "manifests/nvme-tcp-reaper.yaml"}}},
 		{
 			// vast-mgmt credentials Secret (+ namespaces) as a raw-manifest layer.
 			name:         "vast-mgmt-secret",
